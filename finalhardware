@@ -1,0 +1,96 @@
+#include <WiFi.h>
+#include <HTTPClient.h>
+
+// Define the analog pin where the LDR is connected
+#define LDR_PIN 34  //  analog pins
+#define RED 12
+#define GREEN 13
+
+// LDR characteristics (these values might need to be adjusted based on your LDR)
+const float GAMMA = 0.7;
+const float RL10 = 50;  // Resistance of LDR at 10 lux (can vary with LDR type)
+const char* ssid = "LAPTOP-A99PS0B9 8004";
+const char* password = "buhle365";
+int User_Id = 221967575;
+
+const char* WEBserverName = "http://192.168.0.112:5000/add_data";
+
+unsigned long previousMillis = 0;
+const long interval = 10000; // 10 minutes (in milliseconds)
+
+void setup() {
+  Serial.begin(9600);  // You can change to 115200 if needed
+  pinMode(RED, OUTPUT);
+  pinMode(GREEN, OUTPUT);
+
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to WiFi...");
+  }
+
+  Serial.println("Connected to WiFi");
+}
+
+void loop() {
+
+    // Read the analog value from the LDR
+  int analogValue = analogRead(LDR_PIN);
+ 
+  // Convert the analog value to voltage (ESP32 has a 12-bit ADC, range 0-4095)
+  float voltage = analogValue / 4095.0 * 3.3;
+  
+  // Convert the voltage to resistance
+  float ldrResistance = (3.3 - voltage) * 10000 / voltage;
+  
+  // Calculate the lux based on the LDR characteristics
+  float light_intensity = (pow(RL10 * 1e3 * pow(10, GAMMA) / ldrResistance, (1 / GAMMA)))/10;
+  
+  // Control the LEDs based on the lux value
+  if (light_intensity < 10) {
+    digitalWrite(RED, HIGH);
+    digitalWrite(GREEN, LOW);
+  } else if (light_intensity < 20) {
+    digitalWrite(RED, LOW);
+    digitalWrite(GREEN, HIGH);
+  } else {
+    digitalWrite(RED, HIGH);
+    digitalWrite(GREEN, LOW);
+  }
+
+  unsigned long currentMillis = millis();
+  if (currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;
+
+    
+    sendLightIntensity(light_intensity);
+  }
+}
+
+void sendLightIntensity(float light_intensity) {
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    http.begin(WEBserverName);
+    http.addHeader("Content-Type", "application/json");
+
+    String jsonPayload = "{\"User_Id\": " + String(User_Id) + ", \"light_intensity\": " + String(light_intensity, 2) + "}";
+
+    int httpResponseCode = http.POST(jsonPayload);
+
+    if (httpResponseCode > 0) {
+      String response = http.getString();
+      Serial.println(httpResponseCode);
+      Serial.print("http responded");
+      Serial.println(response);
+    } else {
+      Serial.print("Error on sending POST: ");
+      Serial.println(httpResponseCode);
+      Serial.println(light_intensity);
+    }
+
+    http.end();
+  } else {
+    Serial.println("Error in WiFi connection");
+  }
+}
